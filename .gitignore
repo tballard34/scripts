@@ -1,0 +1,12 @@
+# System files
+.DS_Store
+*.swp
+*.swo
+
+# Temporary files
+/tmp/
+*.wav
+*.txt
+
+# Environment files
+.env
