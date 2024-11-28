@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Check if jq is installed
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is not installed. Please install it first (e.g., 'sudo apt install jq' or 'brew install jq')"
+    exit 1
+fi
+
 handle_cleanup() {
     echo -e "\nProcessing recording..."
     trap - INT
