@@ -1,5 +1,37 @@
 #!/bin/bash
 
+# Prerequisite checks
+check_prerequisites() {
+    local missing_tools=()
+
+    # Check for sox
+    if ! command -v sox &> /dev/null; then
+        missing_tools+=("sox")
+        echo "Error: sox is not installed. Please install it first (e.g., 'sudo apt install sox' or 'brew install sox')."
+    fi
+
+    # Check for whisper
+    if ! command -v whisper &> /dev/null; then
+        missing_tools+=("whisper")
+        echo "Error: Whisper is not installed or not in your PATH. Please install it first (e.g., 'pip install openai-whisper')."
+    fi
+
+    # Check for ffmpeg
+    if ! command -v ffmpeg &> /dev/null; then
+        missing_tools+=("ffmpeg")
+        echo "Error: ffmpeg is not installed. Please install it first (e.g., 'sudo apt install ffmpeg' or 'brew install ffmpeg')."
+    fi
+
+    # Exit if any tools are missing
+    if [ ${#missing_tools[@]} -ne 0 ]; then
+        echo "Please install the missing tools and try again."
+        exit 1
+    fi
+}
+
+# Call the prerequisite check function
+check_prerequisites()
+
 handle_cleanup() {
     echo -e "\nProcessing recording..."
     trap - INT
