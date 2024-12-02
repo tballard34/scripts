@@ -11,3 +11,4 @@
 # Environment files
 .env
 .venv
+.venv/

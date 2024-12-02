@@ -4,48 +4,58 @@ A collection of shell scripts for speech-to-text transcription using both OpenAI
 
 ## Prerequisites
 
-- **sox**: Sound processing tool
-- **ffmpeg**: Audio and video converter
-- **Python 3.7 or higher**
-- **pip**: Python package installer
-- **Whisper**: OpenAI's Whisper (for local transcription)
-- **curl**: For API requests (API version only)
-- **jq**: For JSON processing (API version only)
+- macOS or Ubuntu/Debian Linux
+- Git
 
 ## Installation
 
-1. **Clone the repository:**
+1. **Run the setup script:**
 
     ```bash
-    git clone https://github.com/tballard34/speech-to-text-tools.git
-    cd speech-to-text-tools
+    ./setup.sh
     ```
 
-2. **Make the scripts executable:**
+    This script will:
+    - Install Python 3.11 if not present
+    - Install required system dependencies (sox, ffmpeg, jq)
+    - Create a Python virtual environment
+    - Install Whisper and other Python dependencies
+    - Make the transcription scripts executable
 
-    ```bash
-    chmod +x speech_to_text_whisperLocal.sh
-    chmod +x speech_to_text_whisperAPI.sh
-    ```
+## Global Aliases (Optional)
 
-3. **Install dependencies:**
+To use these scripts from anywhere in your terminal, add the following aliases to your `~/.zshrc`:
 
-    - **For macOS:**
+```bash
+# Speech-to-text aliases
+alias speech_to_text='path/to/speech_to_text_whisperAPI.sh'
+alias speech_to_text_local='path/to/speech_to_text_whisperLocal.sh'
+```
 
-        ```bash
-        brew install sox ffmpeg jq
-        pip3 install --upgrade openai-whisper
-        ```
+Replace `path/to` with the actual path to your scripts. For example, if you cloned the repository to your home directory:
 
-    - **For Ubuntu/Debian:**
+```bash
+# Speech-to-text aliases
+alias speech_to_text='$HOME/speech-to-text/speech_to_text_whisperAPI.sh'
+alias speech_to_text_local='$HOME/speech-to-text/speech_to_text_whisperLocal.sh'
+```
 
-        ```bash
-        sudo apt update
-        sudo apt install sox ffmpeg jq
-        pip3 install --upgrade openai-whisper
-        ```
+After adding the aliases:
+1. Save the file
+2. Reload your shell configuration:
+   ```bash
+   source ~/.zshrc
+   ```
 
-    Note: The `pip3 install --upgrade openai-whisper` command will install Whisper and its dependencies, including PyTorch.
+Now you can use the commands globally:
+
+```bash
+# API version
+OPENAI_API_KEY=your_api_key speech_to_text -c
+
+# Local version
+speech_to_text_local -c -t
+```
 
 ## Usage
 

@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Get the script's directory and source the virtual environment
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+    echo "Virtual environment not found. Please run setup.sh first."
+    exit 1
+fi
+
+source "$VENV_DIR/bin/activate"
+
 # Prerequisite checks
 check_prerequisites() {
     local missing_tools=()
@@ -7,30 +18,24 @@ check_prerequisites() {
     # Check for sox
     if ! command -v sox &> /dev/null; then
         missing_tools+=("sox")
-        echo "Error: sox is not installed. Please install it first (e.g., 'sudo apt install sox' or 'brew install sox')."
-    fi
-
-    # Check for whisper
-    if ! command -v whisper &> /dev/null; then
-        missing_tools+=("whisper")
-        echo "Error: Whisper is not installed or not in your PATH. Please install it first (e.g., 'pip install openai-whisper')."
+        echo "Error: sox is not installed. Please run setup.sh first."
     fi
 
     # Check for ffmpeg
     if ! command -v ffmpeg &> /dev/null; then
         missing_tools+=("ffmpeg")
-        echo "Error: ffmpeg is not installed. Please install it first (e.g., 'sudo apt install ffmpeg' or 'brew install ffmpeg')."
+        echo "Error: ffmpeg is not installed. Please run setup.sh first."
     fi
 
     # Exit if any tools are missing
     if [ ${#missing_tools[@]} -ne 0 ]; then
-        echo "Please install the missing tools and try again."
+        echo "Please run setup.sh to install the missing tools and try again."
         exit 1
     fi
 }
 
 # Call the prerequisite check function
-check_prerequisites()
+check_prerequisites
 
 handle_cleanup() {
     echo -e "\nProcessing recording..."
@@ -66,8 +71,8 @@ send_audio_with_whisper() {
 
     echo "Transcribing audio locally with Whisper (using ${model} model)..."
 
-    # Run Whisper locally
-    whisper "$audio_file_path" --model "$model" --output_format txt --output_dir /tmp > /dev/null 2>&1
+    # Run Whisper from virtual environment
+    "$VENV_DIR/bin/whisper" "$audio_file_path" --model "$model" --output_format txt --output_dir /tmp > /dev/null 2>&1
 
     if [ -f "$transcription_file" ] && [ -s "$transcription_file" ]; then
         transcription_text=$(cat "$transcription_file")
@@ -76,8 +81,15 @@ send_audio_with_whisper() {
         echo
 
         if $COPY_TO_CLIPBOARD; then
-            echo "$transcription_text" | pbcopy
-            echo "Transcription copied to clipboard."
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                echo "$transcription_text" | pbcopy
+                echo "Transcription copied to clipboard."
+            elif [[ "$OSTYPE" == "linux-gnu"* ]] && command -v xclip &> /dev/null; then
+                echo "$transcription_text" | xclip -selection clipboard
+                echo "Transcription copied to clipboard."
+            else
+                echo "Clipboard functionality not available on this system."
+            fi
         fi
     else
         echo "No transcription found in the output."
@@ -105,16 +117,6 @@ done
 echo "Recording... Press Enter to stop."
 echo
 
-if ! command -v sox &> /dev/null; then
-    echo "Error: sox is not installed. Please install it first (e.g., 'sudo apt install sox' or 'brew install sox')"
-    exit 1
-fi
-
-if ! command -v whisper &> /dev/null; then
-    echo "Error: Whisper is not installed or not in your PATH. Please install it first (e.g., 'pip install openai-whisper')"
-    exit 1
-fi
-
 sox -q -d "$TEMP_AUDIO" &
 PID=$!
 
@@ -133,4 +135,5 @@ if [ -f "$AUDIO_FILE" ] && [ -s "$AUDIO_FILE" ]; then
 else
     echo "Error: Recording file is empty or not created"
 fi
+
 rm -f "$TEMP_AUDIO" "$AUDIO_FILE"
