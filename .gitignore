@@ -12,3 +12,5 @@
 .env
 .venv
 .venv/
+
+oura_sleep_hour_counter.py
