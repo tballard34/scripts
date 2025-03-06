@@ -12,6 +12,7 @@ A collection of shell scripts for speech-to-text transcription using both OpenAI
 1. **Run the setup script:**
 
     ```bash
+    chmod +x ./setup.sh
     ./setup.sh
     ```
 
