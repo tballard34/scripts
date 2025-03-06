@@ -4,7 +4,7 @@ Trivia Speed Assistant
 
 This script takes a screenshot of the right third of the screen,
 sends it to GPT-4o and/or Mistral AI for analysis, and returns the answer to the trivia question.
-It can also use Gemini 2.0 for OCR to extract text from the image.
+It can also use Gemini 2.0 for OCR to extract text from the image and Perplexity AI for analysis.
 """
 
 import os
@@ -46,6 +46,14 @@ from ocr_and_gemini import (
     shutdown as gemini_shutdown
 )
 
+# Import Perplexity module
+from perplexity import (
+    analyze_trivia_with_perplexity,
+    TriviaAnalysis as PerplexityTriviaAnalysis,
+    set_api_timeout as set_perplexity_api_timeout,
+    shutdown as perplexity_shutdown
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.WARNING,  # Default to WARNING to suppress INFO logs
@@ -65,6 +73,9 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 SCREENSHOTS_DIR = SCRIPT_DIR / ".." / "screenshots"
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
+# Global OCR result to share between Perplexity and other models
+ocr_result = None
+
 async def process_with_gpt(image, args):
     """Process the image with GPT-4o"""
     try:
@@ -77,8 +88,8 @@ async def process_with_gpt(image, args):
             logger.info(f"Answer: {result.answer}")
             logger.info("==========================\n")
         else:
-            # In non-debug mode, only print the answer
-            print(f"{result.answer}")
+            # In non-debug mode, only print the answer with a newline before
+            print(f"\n{result.answer}")
             
     except TimeoutError as e:
         logger.error(f"GPT-4o API request timed out: {e}")
@@ -105,8 +116,8 @@ async def process_with_mistral(image, args):
             logger.info(f"Answer: {result.answer}")
             logger.info("==========================\n")
         else:
-            # In non-debug mode, only print the answer
-            print(f"\033[38;5;208m{result.answer}\033[0m")
+            # In non-debug mode, only print the answer with a newline before
+            print(f"\n\033[38;5;208m{result.answer}\033[0m")
             
     except TimeoutError as e:
         logger.error(f"Mistral API request timed out: {e}")
@@ -121,31 +132,85 @@ async def process_with_mistral(image, args):
         else:
             print("Error: Failed to analyze trivia with Mistral")
 
-async def process_with_gemini_ocr(image, args):
-    """Process the image with Gemini for OCR and answer"""
+async def process_with_perplexity(ocr_result, args, model="sonar-pro"):
+    """Process the OCR result with Perplexity AI
+    
+    Args:
+        ocr_result: The OCR result containing question and options
+        args: Command line arguments
+        model (str, optional): The Perplexity model to use. Defaults to "sonar-pro".
+    """
     try:
-        # Use structured output with Pydantic model
-        result = await extract_text_with_gemini(image, args.debug)
-        
         if args.debug:
-            logger.info("\n=== Gemini OCR Analysis ===")
-            logger.info(f"Question: {result.question}")
-            logger.info(f"Options: {result.options}")
-            logger.info(f"Rationale: {result.rationale}")
-            logger.info(f"Answer: {result.answer}")
-            logger.info("==========================\n")
-        else:
-            # In non-debug mode, print the extracted text and answer in a formatted way
-            print(f"\033[38;5;34m=== Gemini Analysis ===\033[0m")
-            print(f"\033[38;5;34mQuestion: {result.question}\033[0m")
-            if result.options:
-                print(f"\033[38;5;34mOptions:\033[0m")
-                for i, option in enumerate(result.options):
-                    print(f"\033[38;5;34m  {chr(65+i)}. {option}\033[0m")
-            print(f"\033[38;5;34mRationale: {result.rationale}\033[0m")
-            print(f"\033[38;5;34mAnswer: {result.answer}\033[0m")
-            print(f"\033[38;5;34m====================\033[0m")
+            logger.info(f"Sending OCR result to Perplexity for analysis using model: {model}...")
+            print(f"Sending OCR result to Perplexity for analysis using model: {model}...")
         
+        # Send OCR result to Perplexity
+        perplexity_result = await analyze_trivia_with_perplexity(ocr_result, args.debug, model)
+        
+        # Print the result
+        if args.debug:
+            print(f"\n--- Perplexity AI Analysis ({model}) ---")
+            print(f"Answer: {perplexity_result.answer}")
+            print(f"Rationale: {perplexity_result.rationale}")
+        else:
+            if model == "sonar":
+                color_code = "50"  # dark teal
+            elif model == "sonar-pro":
+                color_code = "40"  # blue
+            else: # sonar-reasoning
+                color_code = "30"  # light teal
+            print(f"\n\033[38;5;{color_code}m{perplexity_result.answer}\033[0m")
+        
+        return perplexity_result
+    except TimeoutError as e:
+        logger.error(f"Perplexity API request timed out: {e}")
+        if args.debug:
+            print(f"Error: Perplexity API request timed out after {API_TIMEOUT} seconds")
+        else:
+            print(f"Error: Perplexity API request timed out for model {model}")
+    except Exception as e:
+        if args.debug:
+            logger.error(f"Error analyzing with Perplexity ({model}): {e}")
+            print(f"Error analyzing with Perplexity ({model}): {e}")
+        else:
+            print(f"Error: Failed to analyze with Perplexity ({model})")
+
+async def process_with_gemini_ocr(image, args):
+    """Process the image with Gemini OCR"""
+    global ocr_result
+    try:
+        if args.debug:
+            logger.info("Sending image to Gemini for OCR and analysis...")
+            print("Sending image to Gemini for OCR and analysis...")
+        
+        # Send image to Gemini for OCR
+        ocr_result = await extract_text_with_gemini(image, args.debug)
+        
+        # Print the OCR result
+        if args.debug:
+            # In debug mode, show full details
+            print("\n--- Gemini OCR Result ---")
+            print(f"Question: {ocr_result.question}")
+            print("Options:")
+            for i, option in enumerate(ocr_result.options):
+                print(f"  {i+1}. {option}")
+            print(f"Gemini Answer: {ocr_result.answer}")
+            print(f"Gemini Rationale: {ocr_result.rationale}")
+        elif args.show_ocr:
+            # If --show-ocr flag is enabled, show question and options with spacing
+            # Add a newline before the first line of output
+            print(f"\n{ocr_result.question}\n")
+            for i, option in enumerate(ocr_result.options):
+                print(f"  {i+1}. {option}")
+            print("")
+            # Print the answer in purplish color
+            print(f"\033[38;5;135m{ocr_result.answer}\033[0m")
+        else:
+            # By default, only print the answer in purplish color with a newline before
+            print(f"\n\033[38;5;135m{ocr_result.answer}\033[0m")
+        
+        return ocr_result
     except TimeoutError as e:
         logger.error(f"Gemini OCR API request timed out: {e}")
         if args.debug:
@@ -161,6 +226,7 @@ async def process_with_gemini_ocr(image, args):
 
 async def async_main(args):
     """Async version of main function to handle async API calls"""
+    global ocr_result
     try:
         # Check if an image path was provided
         if hasattr(args, 'image_path') and args.image_path:
@@ -188,7 +254,18 @@ async def async_main(args):
         
         # Run Gemini OCR first if enabled
         if not args.no_gemini_ocr:
-            await process_with_gemini_ocr(image, args)
+            ocr_result = await process_with_gemini_ocr(image, args)
+            
+            # Run Perplexity with OCR result if enabled and OCR was successful
+            if not args.no_perplexity and ocr_result:
+                # Create tasks for both Perplexity models
+                perplexity_tasks = [
+                    process_with_perplexity(ocr_result, args, "sonar"),
+                    process_with_perplexity(ocr_result, args, "sonar-pro"),
+                    process_with_perplexity(ocr_result, args, "sonar-reasoning")
+                ]
+                # Run both Perplexity models in parallel
+                await asyncio.gather(*perplexity_tasks)
         elif args.debug:
             logger.info("Skipping Gemini OCR analysis as requested.")
         
@@ -204,7 +281,7 @@ async def async_main(args):
             
         # If both models are disabled, just return
         if not tasks:
-            if args.debug and args.no_gemini_ocr:
+            if args.debug and args.no_gemini_ocr and args.no_perplexity:
                 logger.info("All analysis options are disabled. No analysis performed.")
             return
             
@@ -236,8 +313,12 @@ def main():
                         help="Skip sending to Mistral AI (just take screenshot)")
     parser.add_argument("--no-gemini-ocr", action="store_true", 
                         help="Skip sending to Gemini 2.0 for OCR (skip text extraction)")
+    parser.add_argument("--no-perplexity", action="store_true", 
+                        help="Skip sending to Perplexity AI (skip Perplexity analysis)")
     parser.add_argument("--debug", action="store_true",
                         help="Print debug information")
+    parser.add_argument("--show-ocr", action="store_true",
+                        help="Show the OCR extracted question and options")
     parser.add_argument("--timeout", type=int, default=API_TIMEOUT,
                         help="Timeout for API calls in seconds (default: {})".format(API_TIMEOUT))
     parser.add_argument("image_path", nargs="?", help="Path to an image file to analyze instead of taking a screenshot")
@@ -249,6 +330,7 @@ def main():
     set_gpt_api_timeout(API_TIMEOUT)
     set_mistral_api_timeout(API_TIMEOUT)
     set_gemini_api_timeout(API_TIMEOUT)
+    set_perplexity_api_timeout(API_TIMEOUT)
     
     # Configure logging level based on debug flag
     if args.debug:
@@ -270,6 +352,7 @@ def main():
         chatgpt_shutdown()
         mistral_shutdown()
         gemini_shutdown()
+        perplexity_shutdown()
         screenshot_shutdown()
 
 if __name__ == "__main__":
