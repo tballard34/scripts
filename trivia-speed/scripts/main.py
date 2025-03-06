@@ -155,12 +155,11 @@ async def process_with_perplexity(ocr_result, args, model="sonar-pro"):
             print(f"Rationale: {perplexity_result.rationale}")
         else:
             if model == "sonar":
-                color_code = "50"  # dark teal
+                print(f"\n\033[38;5;{17}m[Sonar] {perplexity_result.answer}\033[0m")  # dark blue
             elif model == "sonar-pro":
-                color_code = "40"  # blue
+                print(f"\n\033[38;5;{27}m[Sonar Pro] {perplexity_result.answer}\033[0m")  # medium blue
             else: # sonar-reasoning
-                color_code = "30"  # light teal
-            print(f"\n\033[38;5;{color_code}m{perplexity_result.answer}\033[0m")
+                print(f"\n\033[38;5;{75}m[Sonar Reasoning] {perplexity_result.answer}\033[0m")  # light blue
         
         return perplexity_result
     except TimeoutError as e:
@@ -180,54 +179,93 @@ async def process_with_gemini_ocr(image, args):
     """Process the image with Gemini OCR"""
     global ocr_result
     try:
-        if args.debug:
+        # Only show debug messages if not using the --only-sonar* flags or if debug is enabled
+        if args.debug and not (args.only_sonar or args.only_sonar_pro or args.only_sonar_reasoning):
             logger.info("Sending image to Gemini for OCR and analysis...")
             print("Sending image to Gemini for OCR and analysis...")
+        elif args.debug:
+            logger.info("Sending image to Gemini for OCR (output suppressed)...")
         
         # Send image to Gemini for OCR
         ocr_result = await extract_text_with_gemini(image, args.debug)
         
-        # Print the OCR result
-        if args.debug:
-            # In debug mode, show full details
-            print("\n--- Gemini OCR Result ---")
-            print(f"Question: {ocr_result.question}")
-            print("Options:")
-            for i, option in enumerate(ocr_result.options):
-                print(f"  {i+1}. {option}")
-            print(f"Gemini Answer: {ocr_result.answer}")
-            print(f"Gemini Rationale: {ocr_result.rationale}")
-        elif args.show_ocr:
-            # If --show-ocr flag is enabled, show question and options with spacing
-            # Add a newline before the first line of output
-            print(f"\n{ocr_result.question}\n")
-            for i, option in enumerate(ocr_result.options):
-                print(f"  {i+1}. {option}")
-            print("")
-            # Print the answer in purplish color
-            print(f"\033[38;5;135m{ocr_result.answer}\033[0m")
-        else:
-            # By default, only print the answer in purplish color with a newline before
-            print(f"\n\033[38;5;135m{ocr_result.answer}\033[0m")
+        # Print the OCR result only if not using the --only-sonar* flags
+        if not (args.only_sonar or args.only_sonar_pro or args.only_sonar_reasoning):
+            if args.debug:
+                # In debug mode, show full details
+                print("\n--- Gemini OCR Result ---")
+                print(f"Question: {ocr_result.question}")
+                print("Options:")
+                for i, option in enumerate(ocr_result.options):
+                    print(f"  {i+1}. {option}")
+                print(f"Gemini Answer: {ocr_result.answer}")
+                print(f"Gemini Rationale: {ocr_result.rationale}")
+            elif args.show_ocr:
+                # If --show-ocr flag is enabled, show question and options with spacing
+                # Add a newline before the first line of output
+                print(f"\n{ocr_result.question}\n")
+                for i, option in enumerate(ocr_result.options):
+                    print(f"  {i+1}. {option}")
+                print("")
+                # Print the answer in purplish color
+                print(f"\033[38;5;135m{ocr_result.answer}\033[0m")
+            else:
+                # By default, only print the answer in purplish color with a newline before
+                print(f"\n\033[38;5;135m{ocr_result.answer}\033[0m")
         
         return ocr_result
     except TimeoutError as e:
+        # Always log errors, but only print them if not using --only-sonar* flags or if in debug mode
         logger.error(f"Gemini OCR API request timed out: {e}")
         if args.debug:
             print(f"Error: Gemini OCR API request timed out after {API_TIMEOUT} seconds")
-        else:
+        elif not (args.only_sonar or args.only_sonar_pro or args.only_sonar_reasoning):
             print("Error: Gemini OCR API request timed out")
     except Exception as e:
+        # Always log errors, but only print them if not using --only-sonar* flags or if in debug mode
+        logger.error(f"Error extracting text with Gemini OCR: {e}")
         if args.debug:
-            logger.error(f"Error extracting text with Gemini OCR: {e}")
             print(f"Error extracting text with Gemini OCR: {e}")
-        else:
+        elif not (args.only_sonar or args.only_sonar_pro or args.only_sonar_reasoning):
             print("Error: Failed to extract text with Gemini OCR")
 
 async def async_main(args):
     """Async version of main function to handle async API calls"""
     global ocr_result
     try:
+        # Handle the --only-sonar* flags
+        if args.only_sonar or args.only_sonar_pro or args.only_sonar_reasoning:
+            # Force disable other models
+            args.no_gpt = True
+            args.no_mistral = True
+            
+            # Make sure Gemini OCR is enabled
+            args.no_gemini_ocr = False
+            
+            # Set the appropriate Sonar flags based on which --only-sonar* flag is used
+            if args.only_sonar:
+                args.no_sonar = False
+                args.no_sonar_pro = True
+                args.no_sonar_reasoning = True
+            elif args.only_sonar_pro:
+                args.no_sonar = True
+                args.no_sonar_pro = False
+                args.no_sonar_reasoning = True
+            elif args.only_sonar_reasoning:
+                args.no_sonar = True
+                args.no_sonar_pro = True
+                args.no_sonar_reasoning = False
+                
+            if args.debug:
+                logger.info("Using Gemini OCR with only the specified Sonar model.")
+                
+            # Warn if --show-ocr is used with --only-sonar* flags
+            if args.show_ocr:
+                if args.debug:
+                    logger.warning("The --show-ocr flag is ignored when using --only-sonar* flags.")
+                # Disable show_ocr to ensure Gemini output is suppressed
+                args.show_ocr = False
+        
         # Check if an image path was provided
         if hasattr(args, 'image_path') and args.image_path:
             # Load the image from the provided path
@@ -257,15 +295,22 @@ async def async_main(args):
             ocr_result = await process_with_gemini_ocr(image, args)
             
             # Run Perplexity with OCR result if enabled and OCR was successful
-            if not args.no_perplexity and ocr_result:
-                # Create tasks for both Perplexity models
-                perplexity_tasks = [
-                    process_with_perplexity(ocr_result, args, "sonar"),
-                    process_with_perplexity(ocr_result, args, "sonar-pro"),
-                    process_with_perplexity(ocr_result, args, "sonar-reasoning")
-                ]
-                # Run both Perplexity models in parallel
-                await asyncio.gather(*perplexity_tasks)
+            if ocr_result:
+                # Create tasks for enabled Perplexity models
+                perplexity_tasks = []
+                
+                if not args.no_sonar:
+                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar"))
+                
+                if not args.no_sonar_pro:
+                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-pro"))
+                
+                if not args.no_sonar_reasoning:
+                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-reasoning"))
+                
+                # Run enabled Perplexity models in parallel if any
+                if perplexity_tasks:
+                    await asyncio.gather(*perplexity_tasks)
         elif args.debug:
             logger.info("Skipping Gemini OCR analysis as requested.")
         
@@ -281,7 +326,7 @@ async def async_main(args):
             
         # If both models are disabled, just return
         if not tasks:
-            if args.debug and args.no_gemini_ocr and args.no_perplexity:
+            if args.debug and args.no_gemini_ocr and args.no_sonar and args.no_sonar_pro and args.no_sonar_reasoning:
                 logger.info("All analysis options are disabled. No analysis performed.")
             return
             
@@ -313,8 +358,22 @@ def main():
                         help="Skip sending to Mistral AI (just take screenshot)")
     parser.add_argument("--no-gemini-ocr", action="store_true", 
                         help="Skip sending to Gemini 2.0 for OCR (skip text extraction)")
-    parser.add_argument("--no-perplexity", action="store_true", 
-                        help="Skip sending to Perplexity AI (skip Perplexity analysis)")
+    parser.add_argument("--no-sonar", action="store_true", 
+                        help="Skip sending to Perplexity AI Sonar model")
+    parser.add_argument("--no-sonar-pro", action="store_true", 
+                        help="Skip sending to Perplexity AI Sonar Pro model")
+    parser.add_argument("--no-sonar-reasoning", action="store_true", 
+                        help="Skip sending to Perplexity AI Sonar Reasoning model")
+    
+    # Add a group for the mutually exclusive --only-sonar* flags
+    sonar_only_group = parser.add_argument_group('Sonar-only mode options (mutually exclusive)')
+    sonar_only_group.add_argument("--only-sonar", action="store_true",
+                        help="Only use Perplexity AI Sonar model with Gemini OCR (suppresses Gemini output)")
+    sonar_only_group.add_argument("--only-sonar-pro", action="store_true",
+                        help="Only use Perplexity AI Sonar Pro model with Gemini OCR (suppresses Gemini output)")
+    sonar_only_group.add_argument("--only-sonar-reasoning", action="store_true",
+                        help="Only use Perplexity AI Sonar Reasoning model with Gemini OCR (suppresses Gemini output)")
+    
     parser.add_argument("--debug", action="store_true",
                         help="Print debug information")
     parser.add_argument("--show-ocr", action="store_true",
@@ -323,6 +382,13 @@ def main():
                         help="Timeout for API calls in seconds (default: {})".format(API_TIMEOUT))
     parser.add_argument("image_path", nargs="?", help="Path to an image file to analyze instead of taking a screenshot")
     args = parser.parse_args()
+    
+    # Validate that only one of the --only-sonar* flags is used at a time
+    only_sonar_flags = [args.only_sonar, args.only_sonar_pro, args.only_sonar_reasoning]
+    if sum(only_sonar_flags) > 1:
+        print("Error: The --only-sonar, --only-sonar-pro, and --only-sonar-reasoning flags are mutually exclusive.")
+        print("Please use only one of these flags at a time.")
+        return
     
     # Update timeout if specified
     API_TIMEOUT = args.timeout

@@ -13,6 +13,8 @@ import subprocess
 import argparse
 from pathlib import Path
 import re
+import asyncio
+import concurrent.futures
 
 # Add the parent directory to the path so we can import from src
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -45,8 +47,28 @@ def run_main_on_screenshot(screenshot_path, model="gpt", debug=False, verbose=Fa
     # Add model-specific flags
     if model == "gpt":
         cmd.append("--no-mistral")
+        cmd.append("--no-gemini")
+        cmd.append("--no-sonar")
+        cmd.append("--no-sonar-pro")
+        cmd.append("--no-sonar-reasoning")
     elif model == "mistral":
         cmd.append("--no-gpt")
+        cmd.append("--no-gemini")
+        cmd.append("--no-sonar")
+        cmd.append("--no-sonar-pro")
+        cmd.append("--no-sonar-reasoning")
+    elif model == "gemini":
+        cmd.append("--no-gpt")
+        cmd.append("--no-mistral")
+        cmd.append("--no-sonar")
+        cmd.append("--no-sonar-pro")
+        cmd.append("--no-sonar-reasoning")
+    elif model == "sonar":
+        cmd.append("--only-sonar")
+    elif model == "sonar-pro":
+        cmd.append("--only-sonar-pro")
+    elif model == "sonar-reasoning":
+        cmd.append("--only-sonar-reasoning")
     
     # Add the screenshot path
     cmd.append(screenshot_path)
@@ -133,10 +155,39 @@ def extract_answer(output):
         return output[:47] + "..."
     return output
 
-def process_screenshots(screenshots_dir, model, args):
-    """Process all screenshots for a specific model and return results"""
-    results = []
+async def process_screenshot(screenshot_file, model, args):
+    """Process a single screenshot asynchronously"""
+    screenshot_name = screenshot_file.name
+    expected_answers = EXPECTED_ANSWERS.get(screenshot_name, ["Unknown"])
     
+    # Display the first expected answer in the table
+    display_expected = expected_answers[0] if isinstance(expected_answers, list) else expected_answers
+    
+    # Run main.py on the screenshot (in a thread pool to avoid blocking)
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        output, time_taken = await loop.run_in_executor(
+            pool, 
+            lambda: run_main_on_screenshot(str(screenshot_file), model, args.debug, args.verbose)
+        )
+    
+    # Extract the answer from the output
+    actual_answer = extract_answer(output)
+    
+    # Check if the answer is correct
+    is_correct = check_answer(output, expected_answers)
+    
+    return {
+        "screenshot": screenshot_name,
+        "expected_answer": display_expected,
+        "actual_answer": actual_answer,
+        "output": output,
+        "is_correct": is_correct,
+        "time_taken": time_taken
+    }
+
+async def process_screenshots_async(screenshots_dir, model, args):
+    """Process all screenshots for a specific model asynchronously and return results"""
     print(f"\n{'='*50}")
     print(f"Running tests with {model.upper()} model")
     print(f"{'='*50}")
@@ -144,35 +195,21 @@ def process_screenshots(screenshots_dir, model, args):
     print(f"{'Screenshot':<20} | {'Expected Answer':<20} | {'Actual Answer':<30} | {'Correct?':<10} | {'Time (s)':<10}")
     print("-" * 100)
     
-    # Process each screenshot
+    # Create tasks for all screenshots
+    tasks = []
     for screenshot_file in screenshots_dir.glob("*.jpg"):
-        screenshot_name = screenshot_file.name
-        expected_answers = EXPECTED_ANSWERS.get(screenshot_name, ["Unknown"])
-        
-        # Display the first expected answer in the table
-        display_expected = expected_answers[0] if isinstance(expected_answers, list) else expected_answers
-        
-        # Run main.py on the screenshot
-        output, time_taken = run_main_on_screenshot(str(screenshot_file), model, args.debug, args.verbose)
-        
-        # Extract the answer from the output
-        actual_answer = extract_answer(output)
-        
-        # Check if the answer is correct
-        is_correct = check_answer(output, expected_answers)
-        
-        # Print the result
-        print(f"{screenshot_name:<20} | {display_expected:<20} | {actual_answer:<30} | {'Yes' if is_correct else 'No':<10} | {time_taken:.2f}s")
-        
-        # Store the result
-        results.append({
-            "screenshot": screenshot_name,
-            "expected_answer": display_expected,
-            "actual_answer": actual_answer,
-            "output": output,
-            "is_correct": is_correct,
-            "time_taken": time_taken
-        })
+        task = process_screenshot(screenshot_file, model, args)
+        tasks.append(task)
+    
+    # Run all tasks concurrently
+    results = await asyncio.gather(*tasks)
+    
+    # Sort results by screenshot name for consistent output
+    results.sort(key=lambda r: r["screenshot"])
+    
+    # Print results
+    for result in results:
+        print(f"{result['screenshot']:<20} | {result['expected_answer']:<20} | {result['actual_answer']:<30} | {'Yes' if result['is_correct'] else 'No':<10} | {result['time_taken']:.2f}s")
     
     # Print summary
     correct_count = sum(1 for r in results if r["is_correct"])
@@ -189,6 +226,64 @@ def process_screenshots(screenshots_dir, model, args):
     
     return results
 
+async def main_async(args):
+    """Async version of main function"""
+    # Get the path to the screenshots folder
+    screenshots_dir = Path(__file__).parent / "screenshots"
+    
+    # Check if all models are disabled
+    if (args.no_gpt and args.no_mistral and args.no_gemini and 
+        args.no_sonar and args.no_sonar_pro and args.no_sonar_reasoning):
+        print("Error: Cannot disable all models. Please enable at least one model.")
+        return
+    
+    # Process screenshots for each model if not disabled
+    results = {}
+    
+    # Process GPT
+    if not args.no_gpt:
+        results["gpt"] = await process_screenshots_async(screenshots_dir, "gpt", args)
+    
+    # Process Mistral
+    if not args.no_mistral:
+        results["mistral"] = await process_screenshots_async(screenshots_dir, "mistral", args)
+    
+    # Process Gemini
+    if not args.no_gemini:
+        results["gemini"] = await process_screenshots_async(screenshots_dir, "gemini", args)
+    
+    # Process Sonar
+    if not args.no_sonar:
+        results["sonar"] = await process_screenshots_async(screenshots_dir, "sonar", args)
+    
+    # Process Sonar Pro
+    if not args.no_sonar_pro:
+        results["sonar-pro"] = await process_screenshots_async(screenshots_dir, "sonar-pro", args)
+    
+    # Process Sonar Reasoning
+    if not args.no_sonar_reasoning:
+        results["sonar-reasoning"] = await process_screenshots_async(screenshots_dir, "sonar-reasoning", args)
+    
+    # Print comparison if multiple models were tested
+    if len(results) > 1:
+        print("\n" + "="*50)
+        print("Model Comparison")
+        print("="*50)
+        
+        # Get total count (should be the same for all models)
+        total_count = len(next(iter(results.values())))
+        
+        # Print accuracy comparison
+        print("Accuracy:")
+        for model, model_results in results.items():
+            correct_count = sum(1 for r in model_results if r["is_correct"])
+            print(f"{model.upper()} Accuracy: {correct_count}/{total_count} ({correct_count/total_count*100:.1f}%)")
+        
+        print("\nAverage Response Time:")
+        for model, model_results in results.items():
+            avg_time = sum(r['time_taken'] for r in model_results)/total_count
+            print(f"{model.upper()} Average Time: {avg_time:.2f}s")
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Test trivia-speed on a set of screenshots")
@@ -196,42 +291,14 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Show verbose output")
     parser.add_argument("--no-gpt", action="store_true", help="Skip testing with GPT model")
     parser.add_argument("--no-mistral", action="store_true", help="Skip testing with Mistral model")
+    parser.add_argument("--no-gemini", action="store_true", help="Skip testing with Gemini model")
+    parser.add_argument("--no-sonar", action="store_true", help="Skip testing with Sonar model")
+    parser.add_argument("--no-sonar-pro", action="store_true", help="Skip testing with Sonar Pro model")
+    parser.add_argument("--no-sonar-reasoning", action="store_true", help="Skip testing with Sonar Reasoning model")
     args = parser.parse_args()
     
-    # Get the path to the screenshots folder
-    screenshots_dir = Path(__file__).parent / "screenshots"
-    
-    # Check if both models are disabled
-    if args.no_gpt and args.no_mistral:
-        print("Error: Cannot disable both GPT and Mistral models. Please enable at least one model.")
-        return
-    
-    # Process screenshots for GPT if not disabled
-    gpt_results = []
-    if not args.no_gpt:
-        gpt_results = process_screenshots(screenshots_dir, "gpt", args)
-    
-    # Process screenshots for Mistral if not disabled
-    mistral_results = []
-    if not args.no_mistral:
-        mistral_results = process_screenshots(screenshots_dir, "mistral", args)
-    
-    # Print comparison if both models were tested
-    if not args.no_gpt and not args.no_mistral:
-        gpt_correct = sum(1 for r in gpt_results if r["is_correct"])
-        mistral_correct = sum(1 for r in mistral_results if r["is_correct"])
-        total_count = len(gpt_results)  # Should be the same for both
-        
-        print("\n" + "="*50)
-        print("Model Comparison")
-        print("="*50)
-        print(f"GPT Accuracy: {gpt_correct}/{total_count} ({gpt_correct/total_count*100:.1f}%)")
-        print(f"Mistral Accuracy: {mistral_correct}/{total_count} ({mistral_correct/total_count*100:.1f}%)")
-        
-        gpt_avg_time = sum(r['time_taken'] for r in gpt_results)/total_count
-        mistral_avg_time = sum(r['time_taken'] for r in mistral_results)/total_count
-        print(f"GPT Average Time: {gpt_avg_time:.2f}s")
-        print(f"Mistral Average Time: {mistral_avg_time:.2f}s")
+    # Run the async main function
+    asyncio.run(main_async(args))
 
 if __name__ == "__main__":
     main()
