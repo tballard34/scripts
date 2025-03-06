@@ -6,19 +6,19 @@ This module contains functions for interacting with Mistral AI's API
 to analyze trivia questions from images.
 """
 
+import asyncio
+import base64
+import concurrent.futures
+import functools
+import json
+import logging
 import os
 import time
-import asyncio
-import json
-from mistralai import Mistral
-from pydantic import BaseModel
-import functools
-import concurrent.futures
-import logging
-import base64
-from PIL import Image
 from typing import Optional
 
+from mistralai import Mistral
+from PIL import Image
+from pydantic import BaseModel
 # Import screenshot module for image preparation
 from screenshot import prepare_image_for_api
 
@@ -27,6 +27,7 @@ logger = logging.getLogger('trivia-speed')
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Get Mistral API key from environment variables
@@ -67,13 +68,12 @@ client = Mistral(api_key=MISTRAL_API_KEY)
 # Thread pool for CPU-bound tasks
 thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-def prepare_api_request(image, is_raw=False):
+def prepare_api_request(image):
     """
     Prepare the API request payload for Mistral.
     
     Args:
         image (PIL.Image): The image to analyze
-        is_raw (bool): Whether to use raw output format
         
     Returns:
         dict: The API request payload
@@ -81,23 +81,10 @@ def prepare_api_request(image, is_raw=False):
     # Encode the image to base64
     base64_image = prepare_image_for_api(image)
     
-    if is_raw:
-        system_content = """
-You are an expert trivia player. Analyze the question and provide:
-- Brief reasoning (1-2 sentences)
-- Final answer on a new line starting with "ANSWER: "
-
-Example:
-The company was founded in 1975 by Bill Gates and Paul Allen.
-ANSWER: Microsoft
-"""
-    else:
-        system_content = SYSTEM_PROMPT
-    
     messages = [
         {
             "role": "system",
-            "content": system_content
+            "content": SYSTEM_PROMPT
         },
         {
             "role": "user",
@@ -119,13 +106,10 @@ ANSWER: Microsoft
         "messages": messages,
         "max_tokens": MAX_TOKENS,
         "temperature": 0.1,  # Lower temperature for more deterministic responses
-    }
-    
-    # Add response_format for JSON mode if not using raw output
-    if not is_raw:
-        request["response_format"] = {
+        "response_format": {
             "type": "json_object"
         }
+    }
     
     return request
 
@@ -152,7 +136,7 @@ async def analyze_trivia_with_mistral(image, debug=False):
     try:
         request = await loop.run_in_executor(
             thread_pool, 
-            functools.partial(prepare_api_request, image, is_raw=False)
+            functools.partial(prepare_api_request, image)
         )
         
         # Call the Mistral API with timeout
@@ -216,72 +200,6 @@ async def analyze_trivia_with_mistral(image, debug=False):
         except Exception as e:
             logger.error(f"Error processing Mistral response: {e}")
             raise ValueError(f"Failed to process Mistral response: {e}")
-    except Exception as e:
-        logger.error(f"Error preparing API request: {e}")
-        raise ValueError(f"Failed to prepare API request: {e}")
-
-async def analyze_trivia_raw(image, debug=False):
-    """
-    Send the image to Mistral for analysis without structured output.
-    
-    Args:
-        image (PIL.Image): The image to analyze
-        debug (bool, optional): Whether to print debug information.
-        
-    Returns:
-        str: The raw response from Mistral
-    """
-    if not MISTRAL_API_KEY:
-        raise ValueError("Mistral API key not found. Please set it in the .env file.")
-    
-    if debug:
-        logger.info("Sending image to Mistral for raw analysis...")
-    start_time = time.time()
-    
-    # Prepare the API request in a separate thread to avoid blocking
-    loop = asyncio.get_event_loop()
-    try:
-        request = await loop.run_in_executor(
-            thread_pool, 
-            functools.partial(prepare_api_request, image, is_raw=True)
-        )
-        
-        # Call the Mistral API
-        try:
-            response = await asyncio.wait_for(
-                client.chat.complete_async(**request),
-                timeout=API_TIMEOUT
-            )
-            
-            if debug:
-                elapsed = time.time() - start_time
-                logger.info(f"Mistral raw response received in {elapsed:.3f} seconds")
-            
-            content = response.choices[0].message.content
-            
-            # Try to extract just the answer if not in debug mode
-            if not debug:
-                # More efficient string parsing
-                lines = content.strip().split('\n')
-                
-                # Look for an answer line
-                for line in lines:
-                    if line.lower().startswith("answer:"):
-                        return line.replace("answer:", "", 1).strip()
-                
-                # If no explicit answer line, try to find the most likely answer
-                # Typically the last non-empty line is the answer
-                for line in reversed(lines):
-                    if line.strip():
-                        return line.strip()
-            
-            return content.strip() or "No answer found"
-        except asyncio.TimeoutError:
-            logger.error(f"API request timed out after {API_TIMEOUT} seconds")
-            raise TimeoutError(f"Mistral API request timed out after {API_TIMEOUT} seconds")
-        except Exception as e:
-            logger.error(f"Error processing Mistral raw response: {e}")
-            raise ValueError(f"Failed to process Mistral raw response: {e}")
     except Exception as e:
         logger.error(f"Error preparing API request: {e}")
         raise ValueError(f"Failed to prepare API request: {e}")

@@ -1,161 +1,77 @@
 # Trivia Speed Assistant
 
-A fast and efficient system for analyzing trivia questions using GPT-4o and Mistral AI.
+A tool to help you quickly answer trivia questions by taking a screenshot and analyzing it with AI.
 
-## Architecture
+## Features
 
-The system consists of two main components:
+- Takes a screenshot of the right third of your screen (where trivia questions typically appear)
+- Analyzes the image using multiple AI models:
+  - **GPT-4o**: For answering trivia questions with reasoning
+  - **Mistral AI**: Alternative model for answering trivia questions
+  - **Gemini 2.0**: For OCR (Optical Character Recognition) to extract text from the image
+- Provides answers quickly with optional detailed reasoning
+- Uses structured JSON output for consistent parsing
+- Concurrent processing for faster results
 
-1. **Client (`client/trivia-client.py`)**: 
-   - Takes screenshots locally
-   - Processes and optimizes images
-   - Sends images to the server for analysis
-   - Displays results
+## Setup
 
-2. **Server (`server/trivia-server.py`)**: 
-   - Maintains persistent connections with OpenAI and Mistral AI
-   - Receives images from the client
-   - Sends images to GPT-4o and/or Mistral AI for analysis
-   - Returns structured results
-
-This architecture provides several benefits:
-- Reduced latency through persistent connections
-- Separation of concerns (client handles UI/screenshots, server handles AI)
-- More efficient resource usage
-- Parallel processing with multiple AI models
-
-## Directory Structure
-
-```
-trivia-speed/
-├── client/                # Client-side code
-│   ├── trivia-client.py   # Client implementation
-│   └── trivia.sh          # Client shell script
-├── server/                # Server-side code
-│   ├── trivia-server.py   # Server implementation
-│   └── start-server.sh    # Server shell script
-├── common/                # Shared resources
-│   ├── requirements.txt   # Dependencies
-│   ├── .env               # Environment variables
-│   ├── .env.example       # Example environment file
-│   └── screenshots/       # Directory for saved screenshots
-├── trivia-main.py         # Main entry point
-├── trivia.sh              # Main shell script
-└── README.md              # This file
-```
-
-## Installation
-
-1. Clone this repository:
-   ```bash
-   git clone <repository-url>
-   cd trivia-speed
-   ```
-
+1. Clone this repository
 2. Install dependencies:
-   ```bash
-   pip install -r common/requirements.txt
    ```
-
-   > **Note:** This project requires mistralai>=1.5.0, which uses the new Mistral client API. If you encounter errors related to the Mistral client, make sure you have the latest version installed.
-
-3. Create a `.env` file in the `common` directory with your API keys:
+   pnpm install
    ```
-   OPENAI_API_KEY=your_openai_api_key_here
-   MISTRAL_API_KEY=your_mistral_api_key_here
+3. Create a `.env` file with your API keys:
+   ```
+   OPENAI_API_KEY=your_openai_api_key
+   MISTRAL_API_KEY=your_mistral_api_key
+   GEMINI_API_KEY=your_gemini_api_key
+   API_TIMEOUT=15
    MAX_TOKENS=200
-   MISTRAL_MAX_TOKENS=200
    ```
 
 ## Usage
 
-### Using the Main Script
-
-The easiest way to use the system is through the main script:
-
-```bash
-./trivia.sh [command] [options]
+```
+python scripts/main.py [options]
 ```
 
-Commands:
-- `server`: Start the trivia server
-- `client`: Start the trivia client
+### Options
 
-Examples:
-```bash
-# Start the server
-./trivia.sh server
-
-# Start the client
-./trivia.sh client
-
-# Start the client with options
-./trivia.sh client --quality 90 --debug
-```
-
-### Starting the Server Directly
-
-```bash
-./server/start-server.sh
-```
-
-The server will start and listen on http://127.0.0.1:8000.
-
-### Using the Client Directly
-
-```bash
-./client/trivia.sh [options]
-```
-
-Options:
+- `-o, --output`: Output file path (default: screenshots folder with timestamp)
 - `-q, --quality`: JPEG quality (1-100, default: 60)
 - `-r, --resize`: Resize factor for the image (default: 0.5 = 50%)
 - `--save-original`: Save an unmodified copy of the screenshot
-- `--no-gpt`: Skip sending to GPT-4o (just take screenshot)
-- `--no-mistral`: Skip sending to Mistral AI (just take screenshot)
+- `--no-gpt`: Skip sending to GPT-4o
+- `--no-mistral`: Skip sending to Mistral AI
+- `--no-gemini-ocr`: Skip sending to Gemini 2.0 for OCR (skip text extraction)
 - `--debug`: Print debug information
-- `--raw`: Use raw output from models instead of structured JSON
+- `--timeout`: Timeout for API calls in seconds (default: 15)
+- `image_path`: Path to an image file to analyze instead of taking a screenshot
 
-## API Endpoints
+### Examples
 
-The server exposes the following endpoints:
+Basic usage (takes screenshot and analyzes with all models):
+```
+python scripts/main.py
+```
 
-- `GET /`: Check if the server is running
-- `POST /analyze`: Analyze a trivia question from a base64-encoded image
-- `POST /analyze-upload`: Analyze a trivia question from an uploaded image file
+Use only Gemini for OCR:
+```
+python scripts/main.py --no-gpt --no-mistral
+```
 
-## Performance
+Analyze an existing image:
+```
+python scripts/main.py path/to/image.jpg
+```
 
-The system is optimized for speed:
-- Local screenshot capture reduces network overhead
-- Persistent connections with AI providers reduce latency
-- Image optimization reduces transfer size
-- Structured output parsing for consistent results
-- Parallel processing with multiple AI models for comparison and redundancy
+## Requirements
 
-## AI Models
-
-The system supports two AI models:
-
-1. **GPT-4o (OpenAI)**: A powerful multimodal model that can analyze images and text.
-2. **Pixtral 12B (Mistral AI)**: A vision-capable model that can analyze images and provide insights.
-
-You can use either model individually or both in parallel. When both models are used, they run concurrently for maximum speed.
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Make sure the server is running (`./trivia.sh server`)
-2. Check your API keys in the `common/.env` file
-3. Ensure all dependencies are installed
-4. Check the server logs for error messages
-5. If you see errors related to the Mistral client, ensure you have mistralai>=1.5.0 installed:
-   ```bash
-   pip install "mistralai>=1.5.0"
-   ```
-   The project uses the new Mistral client API, which is not compatible with older versions.
+- Python 3.8+
+- OpenAI API key (for GPT-4o)
+- Mistral API key (for Mistral AI)
+- Gemini API key (for OCR)
 
 ## License
 
-[MIT License](LICENSE)
+MIT

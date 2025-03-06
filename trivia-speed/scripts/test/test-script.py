@@ -36,7 +36,6 @@ def run_main_on_screenshot(screenshot_path, model="gpt", debug=False, verbose=Fa
     cmd = [
         "python", 
         str(Path(__file__).parent.parent / "main.py"),
-        "--raw",  # Use raw output for simpler parsing
     ]
     
     # Add debug flag if requested
@@ -114,23 +113,18 @@ def extract_answer(output):
     if not output:
         return ""
     
-    # Look for "ANSWER:" in the output
-    for line in output.split('\n'):
-        if "ANSWER:" in line:
-            return line.replace("ANSWER:", "").strip()
+    # The output should now always be just the answer since we're using structured output
+    # and main.py only prints the answer in non-debug mode
+    if output and not output.startswith("{") and not "===" in output:
+        return output.strip()
     
-    # Look for a line that might contain the answer (after "rationale" or "reasoning")
-    lines = output.split('\n')
-    for i, line in enumerate(lines):
-        if "rationale" in line.lower() or "reasoning" in line.lower() or "analysis" in line.lower():
-            # The answer might be in the next line or two
-            if i + 1 < len(lines) and lines[i + 1].strip():
-                return lines[i + 1].strip()
-            elif i + 2 < len(lines) and lines[i + 2].strip():
-                return lines[i + 2].strip()
+    # For debug mode or other formats, try to extract the answer
+    for line in output.split('\n'):
+        if "Answer:" in line:
+            return line.replace("Answer:", "").strip()
     
     # If no clear answer found, return the last non-empty line (often the answer)
-    non_empty_lines = [line.strip() for line in lines if line.strip()]
+    non_empty_lines = [line.strip() for line in output.split('\n') if line.strip()]
     if non_empty_lines:
         return non_empty_lines[-1]
     

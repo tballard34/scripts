@@ -4,6 +4,7 @@ Trivia Speed Assistant
 
 This script takes a screenshot of the right third of the screen,
 sends it to GPT-4o and/or Mistral AI for analysis, and returns the answer to the trivia question.
+It can also use Gemini 2.0 for OCR to extract text from the image.
 """
 
 import os
@@ -24,7 +25,6 @@ from screenshot import (
 # Import chatgpt module
 from chatgpt import (
     analyze_trivia_with_gpt4o,
-    analyze_trivia_raw as analyze_trivia_raw_gpt,
     TriviaAnalysis as GPTTriviaAnalysis,
     set_api_timeout as set_gpt_api_timeout,
     shutdown as chatgpt_shutdown
@@ -33,10 +33,17 @@ from chatgpt import (
 # Import mistral module
 from mistral import (
     analyze_trivia_with_mistral,
-    analyze_trivia_raw as analyze_trivia_raw_mistral,
     TriviaAnalysis as MistralTriviaAnalysis,
     set_api_timeout as set_mistral_api_timeout,
     shutdown as mistral_shutdown
+)
+
+# Import Gemini OCR module
+from ocr_and_gemini import (
+    extract_text_with_gemini,
+    OCRResult,
+    set_api_timeout as set_gemini_api_timeout,
+    shutdown as gemini_shutdown
 )
 
 # Configure logging
@@ -61,27 +68,17 @@ SCREENSHOTS_DIR.mkdir(exist_ok=True)
 async def process_with_gpt(image, args):
     """Process the image with GPT-4o"""
     try:
-        if args.raw:
-            # Use raw output without JSON structure
-            result = await analyze_trivia_raw_gpt(image, args.debug)
-            if args.debug:
-                logger.info("\n=== GPT-4o Raw Analysis ===")
-                logger.info(result)
-                logger.info("==========================\n")
-            else:
-                print(f"{result}")
+        # Use structured output with Pydantic model
+        result = await analyze_trivia_with_gpt4o(image, args.debug)
+        
+        if args.debug:
+            logger.info("\n=== GPT-4o Analysis ===")
+            logger.info(f"Rationale: {result.rationale}")
+            logger.info(f"Answer: {result.answer}")
+            logger.info("==========================\n")
         else:
-            # Use structured output with Pydantic model
-            result = await analyze_trivia_with_gpt4o(image, args.debug)
-            
-            if args.debug:
-                logger.info("\n=== GPT-4o Analysis ===")
-                logger.info(f"Rationale: {result.rationale}")
-                logger.info(f"Answer: {result.answer}")
-                logger.info("==========================\n")
-            else:
-                # In non-debug mode, only print the answer
-                print(f"{result.answer}")
+            # In non-debug mode, only print the answer
+            print(f"{result.answer}")
             
     except TimeoutError as e:
         logger.error(f"GPT-4o API request timed out: {e}")
@@ -89,62 +86,27 @@ async def process_with_gpt(image, args):
             print(f"Error: GPT-4o API request timed out after {API_TIMEOUT} seconds")
         else:
             print("Error: GPT-4o API request timed out")
-        
-        # Try fallback if timeout occurs
-        if not args.raw and args.debug:
-            logger.info("Falling back to raw output due to timeout...")
-            try:
-                # Fallback to raw output with shorter timeout
-                result = await asyncio.wait_for(
-                    analyze_trivia_raw_gpt(image, args.debug),
-                    timeout=API_TIMEOUT - 2  # Shorter timeout for fallback
-                )
-                logger.info("\n=== GPT-4o Fallback Analysis ===")
-                logger.info(result)
-                logger.info("==========================\n")
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
     except Exception as e:
         if args.debug:
             logger.error(f"Error analyzing trivia with GPT-4o: {e}")
             print(f"Error analyzing trivia with GPT-4o: {e}")
-            print("Falling back to raw output...")
-            try:
-                # Fallback to raw output
-                result = await analyze_trivia_raw_gpt(image, args.debug)
-                print("\n=== GPT-4o Fallback Analysis ===")
-                print(result)
-                print("==========================\n")
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                print(f"Fallback also failed: {fallback_error}")
         else:
             print("Error: Failed to analyze trivia with GPT-4o")
 
 async def process_with_mistral(image, args):
     """Process the image with Mistral AI"""
     try:
-        if args.raw:
-            # Use raw output without JSON structure
-            result = await analyze_trivia_raw_mistral(image, args.debug)
-            if args.debug:
-                logger.info("\n=== Mistral Raw Analysis ===")
-                logger.info(result)
-                logger.info("==========================\n")
-            else:
-                print(f"\033[38;5;208m{result}\033[0m")
+        # Always use structured output with Pydantic model
+        result = await analyze_trivia_with_mistral(image, args.debug)
+        
+        if args.debug:
+            logger.info("\n=== Mistral Analysis ===")
+            logger.info(f"Rationale: {result.rationale}")
+            logger.info(f"Answer: {result.answer}")
+            logger.info("==========================\n")
         else:
-            # Use structured output with Pydantic model
-            result = await analyze_trivia_with_mistral(image, args.debug)
-            
-            if args.debug:
-                logger.info("\n=== Mistral Analysis ===")
-                logger.info(f"Rationale: {result.rationale}")
-                logger.info(f"Answer: {result.answer}")
-                logger.info("==========================\n")
-            else:
-                # In non-debug mode, only print the answer
-                print(f"\033[38;5;208m{result.answer}\033[0m")
+            # In non-debug mode, only print the answer
+            print(f"\033[38;5;208m{result.answer}\033[0m")
             
     except TimeoutError as e:
         logger.error(f"Mistral API request timed out: {e}")
@@ -152,37 +114,50 @@ async def process_with_mistral(image, args):
             print(f"Error: Mistral API request timed out after {API_TIMEOUT} seconds")
         else:
             print("Error: Mistral API request timed out")
-        
-        # Try fallback if timeout occurs
-        if not args.raw and args.debug:
-            logger.info("Falling back to raw output due to timeout...")
-            try:
-                # Fallback to raw output with shorter timeout
-                result = await asyncio.wait_for(
-                    analyze_trivia_raw_mistral(image, args.debug),
-                    timeout=API_TIMEOUT - 2  # Shorter timeout for fallback
-                )
-                logger.info("\n=== Mistral Fallback Analysis ===")
-                logger.info(result)
-                logger.info("==========================\n")
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
     except Exception as e:
         if args.debug:
             logger.error(f"Error analyzing trivia with Mistral: {e}")
             print(f"Error analyzing trivia with Mistral: {e}")
-            print("Falling back to raw output...")
-            try:
-                # Fallback to raw output
-                result = await analyze_trivia_raw_mistral(image, args.debug)
-                print("\n=== Mistral Fallback Analysis ===")
-                print(result)
-                print("==========================\n")
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                print(f"Fallback also failed: {fallback_error}")
         else:
             print("Error: Failed to analyze trivia with Mistral")
+
+async def process_with_gemini_ocr(image, args):
+    """Process the image with Gemini for OCR and answer"""
+    try:
+        # Use structured output with Pydantic model
+        result = await extract_text_with_gemini(image, args.debug)
+        
+        if args.debug:
+            logger.info("\n=== Gemini OCR Analysis ===")
+            logger.info(f"Question: {result.question}")
+            logger.info(f"Options: {result.options}")
+            logger.info(f"Rationale: {result.rationale}")
+            logger.info(f"Answer: {result.answer}")
+            logger.info("==========================\n")
+        else:
+            # In non-debug mode, print the extracted text and answer in a formatted way
+            print(f"\033[38;5;34m=== Gemini Analysis ===\033[0m")
+            print(f"\033[38;5;34mQuestion: {result.question}\033[0m")
+            if result.options:
+                print(f"\033[38;5;34mOptions:\033[0m")
+                for i, option in enumerate(result.options):
+                    print(f"\033[38;5;34m  {chr(65+i)}. {option}\033[0m")
+            print(f"\033[38;5;34mRationale: {result.rationale}\033[0m")
+            print(f"\033[38;5;34mAnswer: {result.answer}\033[0m")
+            print(f"\033[38;5;34m====================\033[0m")
+        
+    except TimeoutError as e:
+        logger.error(f"Gemini OCR API request timed out: {e}")
+        if args.debug:
+            print(f"Error: Gemini OCR API request timed out after {API_TIMEOUT} seconds")
+        else:
+            print("Error: Gemini OCR API request timed out")
+    except Exception as e:
+        if args.debug:
+            logger.error(f"Error extracting text with Gemini OCR: {e}")
+            print(f"Error extracting text with Gemini OCR: {e}")
+        else:
+            print("Error: Failed to extract text with Gemini OCR")
 
 async def async_main(args):
     """Async version of main function to handle async API calls"""
@@ -208,8 +183,14 @@ async def async_main(args):
                 args.save_original
             )
         
-        # Create tasks for GPT and Mistral analysis if not disabled
+        # Create tasks for GPT, Mistral, and Gemini OCR analysis if not disabled
         tasks = []
+        
+        # Run Gemini OCR first if enabled
+        if not args.no_gemini_ocr:
+            await process_with_gemini_ocr(image, args)
+        elif args.debug:
+            logger.info("Skipping Gemini OCR analysis as requested.")
         
         if not args.no_gpt:
             tasks.append(process_with_gpt(image, args))
@@ -223,8 +204,8 @@ async def async_main(args):
             
         # If both models are disabled, just return
         if not tasks:
-            if args.debug:
-                logger.info("Both GPT-4o and Mistral analysis are disabled. No analysis performed.")
+            if args.debug and args.no_gemini_ocr:
+                logger.info("All analysis options are disabled. No analysis performed.")
             return
             
         # Run all tasks concurrently
@@ -253,10 +234,10 @@ def main():
                         help="Skip sending to GPT-4o (just take screenshot)")
     parser.add_argument("--no-mistral", action="store_true", 
                         help="Skip sending to Mistral AI (just take screenshot)")
+    parser.add_argument("--no-gemini-ocr", action="store_true", 
+                        help="Skip sending to Gemini 2.0 for OCR (skip text extraction)")
     parser.add_argument("--debug", action="store_true",
                         help="Print debug information")
-    parser.add_argument("--raw", action="store_true",
-                        help="Use raw output from models instead of structured JSON")
     parser.add_argument("--timeout", type=int, default=API_TIMEOUT,
                         help="Timeout for API calls in seconds (default: {})".format(API_TIMEOUT))
     parser.add_argument("image_path", nargs="?", help="Path to an image file to analyze instead of taking a screenshot")
@@ -267,6 +248,7 @@ def main():
     # Update timeout in modules
     set_gpt_api_timeout(API_TIMEOUT)
     set_mistral_api_timeout(API_TIMEOUT)
+    set_gemini_api_timeout(API_TIMEOUT)
     
     # Configure logging level based on debug flag
     if args.debug:
@@ -287,6 +269,7 @@ def main():
         # Clean up thread pools
         chatgpt_shutdown()
         mistral_shutdown()
+        gemini_shutdown()
         screenshot_shutdown()
 
 if __name__ == "__main__":

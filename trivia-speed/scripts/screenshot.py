@@ -59,15 +59,20 @@ def take_right_third_screenshot(
         screen_height = monitor["height"]
         
         # Calculate the right third of the screen
-        right_third_width = screen_width // 3
+        right_third_width = screen_width * .29
         right_third_x = screen_width - right_third_width
+
+        left_padding = 30
+        right_padding = 30
+        top_padding = 430
+        bottom_padding = 80
         
         # Define the region to capture
         region = {
-            "top": 0,
-            "left": right_third_x,
-            "width": right_third_width,
-            "height": screen_height
+            "top": 0 + top_padding,
+            "left": right_third_x + left_padding,
+            "width": right_third_width - left_padding - right_padding,
+            "height": screen_height - top_padding - bottom_padding
         }
         
         if debug:

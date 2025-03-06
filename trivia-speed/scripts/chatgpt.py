@@ -6,18 +6,18 @@ This module contains functions for interacting with OpenAI's GPT-4o API
 to analyze trivia questions from images.
 """
 
+import asyncio
+import concurrent.futures
+import functools
+import logging
 import os
 import time
-import asyncio
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
-from pydantic import BaseModel
-import functools
-import concurrent.futures
-import logging
-from PIL import Image
 from typing import Optional
 
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+from PIL import Image
+from pydantic import BaseModel
 # Import screenshot module for image preparation
 from screenshot import prepare_image_for_api
 
@@ -34,7 +34,7 @@ MODEL = "gpt-4o"
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "200"))  # Reduced token count for faster response
 API_TIMEOUT = int(os.getenv("API_TIMEOUT", "15"))  # Timeout for API calls in seconds
 
-# Do not change the system prompt AI
+# Do not change the system prompt - this is for the AI
 SYSTEM_PROMPT = """
 # Role
 You are an expert trivia player.
@@ -65,13 +65,12 @@ client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=API_TIMEOUT)
 # Thread pool for CPU-bound tasks
 thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-def prepare_api_request(image, is_raw=False):
+def prepare_api_request(image):
     """
     Prepare the API request payload for GPT-4o.
     
     Args:
         image (PIL.Image): The image to analyze
-        is_raw (bool): Whether to use raw output format
         
     Returns:
         dict: The API request payload
@@ -79,16 +78,8 @@ def prepare_api_request(image, is_raw=False):
     # Encode the image to base64
     base64_image = prepare_image_for_api(image)
     
-    if is_raw:
-        system_content = """
-You are an expert trivia player. Analyze the question and provide:
-- Brief reasoning (1-2 sentences)
-- Final answer on a new line starting with "ANSWER: "
-"""
-        response_format = None
-    else:
-        system_content = SYSTEM_PROMPT
-        response_format = TriviaAnalysis
+    system_content = SYSTEM_PROMPT
+    response_format = TriviaAnalysis
     
     request = {
         "model": MODEL,
@@ -115,10 +106,8 @@ You are an expert trivia player. Analyze the question and provide:
         ],
         "max_tokens": MAX_TOKENS,
         "temperature": 0.1,  # Lower temperature for more deterministic responses
+        "response_format": response_format
     }
-    
-    if response_format:
-        request["response_format"] = response_format
     
     return request
 
@@ -145,7 +134,7 @@ async def analyze_trivia_with_gpt4o(image, debug=False):
     try:
         request = await loop.run_in_executor(
             thread_pool, 
-            functools.partial(prepare_api_request, image, is_raw=False)
+            functools.partial(prepare_api_request, image)
         )
         
         # Call the OpenAI API with parse method and timeout
@@ -167,63 +156,6 @@ async def analyze_trivia_with_gpt4o(image, debug=False):
         except Exception as e:
             logger.error(f"Error processing GPT-4o response: {e}")
             raise ValueError(f"Failed to process GPT-4o response: {e}")
-    except Exception as e:
-        logger.error(f"Error preparing API request: {e}")
-        raise ValueError(f"Failed to prepare API request: {e}")
-
-async def analyze_trivia_raw(image, debug=False):
-    """
-    Send the image to GPT-4o for analysis without structured output.
-    
-    Args:
-        image (PIL.Image): The image to analyze
-        debug (bool, optional): Whether to print debug information.
-        
-    Returns:
-        str: The raw response from GPT-4o
-    """
-    if not OPENAI_API_KEY:
-        raise ValueError("OpenAI API key not found. Please set it in the .env file.")
-    
-    if debug:
-        logger.info("Sending image to GPT-4o for raw analysis...")
-    start_time = time.time()
-    
-    # Prepare the API request in a separate thread to avoid blocking
-    loop = asyncio.get_event_loop()
-    try:
-        request = await loop.run_in_executor(
-            thread_pool, 
-            functools.partial(prepare_api_request, image, is_raw=True)
-        )
-        
-        # Call the OpenAI API without JSON response format
-        try:
-            response = await asyncio.wait_for(
-                client.chat.completions.create(**request),
-                timeout=API_TIMEOUT
-            )
-            
-            if debug:
-                elapsed = time.time() - start_time
-                logger.info(f"GPT-4o raw response received in {elapsed:.3f} seconds")
-            
-            content = response.choices[0].message.content
-            
-            # Try to extract just the answer if not in debug mode
-            if not debug:
-                # More efficient string parsing
-                for line in content.split('\n'):
-                    if line.startswith("ANSWER:"):
-                        return line.replace("ANSWER:", "").strip()
-            
-            return content
-        except asyncio.TimeoutError:
-            logger.error(f"API request timed out after {API_TIMEOUT} seconds")
-            raise TimeoutError(f"GPT-4o API request timed out after {API_TIMEOUT} seconds")
-        except Exception as e:
-            logger.error(f"Error processing GPT-4o raw response: {e}")
-            raise ValueError(f"Failed to process GPT-4o raw response: {e}")
     except Exception as e:
         logger.error(f"Error preparing API request: {e}")
         raise ValueError(f"Failed to prepare API request: {e}")
