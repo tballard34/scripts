@@ -130,23 +130,23 @@ async def extract_text_with_gemini(image, debug=False):
     # Prepare the API request in a separate thread to avoid blocking
     loop = asyncio.get_event_loop()
     try:
+        # Run the image preparation in a thread pool to avoid blocking the event loop
         request = await loop.run_in_executor(
             thread_pool, 
             functools.partial(prepare_api_request, image)
         )
         
-        # Call the Gemini API with timeout
+        # Create a coroutine to call the Gemini API
+        async def call_gemini_api():
+            model = genai.GenerativeModel(MODEL)
+            response = await loop.run_in_executor(
+                thread_pool,
+                lambda: model.generate_content(**request)
+            )
+            return response
+        
+        # Call with timeout
         try:
-            # Create a coroutine to call the Gemini API
-            async def call_gemini_api():
-                model = genai.GenerativeModel(MODEL)
-                response = await loop.run_in_executor(
-                    thread_pool,
-                    lambda: model.generate_content(**request)
-                )
-                return response
-            
-            # Call with timeout
             response = await asyncio.wait_for(
                 call_gemini_api(),
                 timeout=API_TIMEOUT

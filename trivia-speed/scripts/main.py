@@ -148,6 +148,14 @@ async def process_with_perplexity(ocr_result, args, model="sonar-pro"):
         # Send OCR result to Perplexity
         perplexity_result = await analyze_trivia_with_perplexity(ocr_result, args.debug, model)
         
+        # Check if we got a valid result
+        if perplexity_result is None:
+            if args.debug:
+                print(f"\nError: Failed to get response from Perplexity ({model})")
+            else:
+                print(f"\n\033[31mError: Failed to get response from Perplexity ({model})\033[0m")
+            return None
+        
         # Print the result
         if args.debug:
             print(f"\n--- Perplexity AI Analysis ({model}) ---")
@@ -155,9 +163,9 @@ async def process_with_perplexity(ocr_result, args, model="sonar-pro"):
             print(f"Rationale: {perplexity_result.rationale}")
         else:
             if model == "sonar":
-                print(f"\n\033[38;5;{17}m[Sonar] {perplexity_result.answer}\033[0m")  # dark blue
+                print(f"\n\033[38;5;{27}m[Sonar] {perplexity_result.answer}\033[0m")  # lighter blue
             elif model == "sonar-pro":
-                print(f"\n\033[38;5;{27}m[Sonar Pro] {perplexity_result.answer}\033[0m")  # medium blue
+                print(f"\n\033[38;5;{40}m[Sonar Pro] {perplexity_result.answer}\033[0m")  # medium blue
             else: # sonar-reasoning
                 print(f"\n\033[38;5;{75}m[Sonar Reasoning] {perplexity_result.answer}\033[0m")  # light blue
         
@@ -174,6 +182,8 @@ async def process_with_perplexity(ocr_result, args, model="sonar-pro"):
             print(f"Error analyzing with Perplexity ({model}): {e}")
         else:
             print(f"Error: Failed to analyze with Perplexity ({model})")
+    
+    return None
 
 async def process_with_gemini_ocr(image, args):
     """Process the image with Gemini OCR"""
@@ -287,33 +297,10 @@ async def async_main(args):
                 args.save_original
             )
         
-        # Create tasks for GPT, Mistral, and Gemini OCR analysis if not disabled
+        # Create tasks for all models that can run in parallel immediately
         tasks = []
         
-        # Run Gemini OCR first if enabled
-        if not args.no_gemini_ocr:
-            ocr_result = await process_with_gemini_ocr(image, args)
-            
-            # Run Perplexity with OCR result if enabled and OCR was successful
-            if ocr_result:
-                # Create tasks for enabled Perplexity models
-                perplexity_tasks = []
-                
-                if not args.no_sonar:
-                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar"))
-                
-                if not args.no_sonar_pro:
-                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-pro"))
-                
-                if not args.no_sonar_reasoning:
-                    perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-reasoning"))
-                
-                # Run enabled Perplexity models in parallel if any
-                if perplexity_tasks:
-                    await asyncio.gather(*perplexity_tasks)
-        elif args.debug:
-            logger.info("Skipping Gemini OCR analysis as requested.")
-        
+        # Start GPT and Mistral immediately - they don't need to wait for OCR
         if not args.no_gpt:
             tasks.append(process_with_gpt(image, args))
         elif args.debug:
@@ -323,8 +310,45 @@ async def async_main(args):
             tasks.append(process_with_mistral(image, args))
         elif args.debug:
             logger.info("Skipping Mistral analysis as requested.")
+        
+        # Create a separate task for Gemini OCR and Perplexity models
+        # This allows Perplexity to start as soon as OCR is done without waiting for GPT/Mistral
+        async def process_ocr_and_perplexity():
+            global ocr_result
             
-        # If both models are disabled, just return
+            # Skip if Gemini OCR is disabled
+            if args.no_gemini_ocr:
+                if args.debug:
+                    logger.info("Skipping Gemini OCR analysis as requested.")
+                return
+                
+            # Run Gemini OCR
+            ocr_result = await process_with_gemini_ocr(image, args)
+            
+            # If OCR failed, we can't run Perplexity models
+            if not ocr_result:
+                return
+                
+            # Create tasks for enabled Perplexity models
+            perplexity_tasks = []
+            
+            if not args.no_sonar:
+                perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar"))
+            
+            if not args.no_sonar_pro:
+                perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-pro"))
+            
+            if not args.no_sonar_reasoning:
+                perplexity_tasks.append(process_with_perplexity(ocr_result, args, "sonar-reasoning"))
+            
+            # Run enabled Perplexity models in parallel if any
+            if perplexity_tasks:
+                await asyncio.gather(*perplexity_tasks)
+        
+        # Add the OCR and Perplexity task to the main tasks list
+        tasks.append(process_ocr_and_perplexity())
+        
+        # If all models are disabled, just return
         if not tasks:
             if args.debug and args.no_gemini_ocr and args.no_sonar and args.no_sonar_pro and args.no_sonar_reasoning:
                 logger.info("All analysis options are disabled. No analysis performed.")

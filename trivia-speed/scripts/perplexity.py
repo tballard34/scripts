@@ -127,14 +127,44 @@ def extract_json_from_sonar_reasoning(content):
                 return json.loads(json_str)
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse JSON from sonar-reasoning output")
-                raise ValueError("Failed to parse JSON from sonar-reasoning output")
+                # Fall through to try other methods
     
-    # If no <think> section or no JSON found, try to parse the whole content as JSON
+    # If no <think> section or no JSON found in code blocks, try to find JSON-like structure
+    json_match = re.search(r'\{.*"rationale".*"answer".*\}', content, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            # Continue to next method
+            pass
+    
+    # If still no valid JSON, try to extract rationale and answer directly
+    rationale = ""
+    answer = ""
+    
+    # Look for rationale and answer in the text
+    rationale_match = re.search(r'"rationale"\s*:\s*"([^"]*)"', content)
+    answer_match = re.search(r'"answer"\s*:\s*"([^"]*)"', content)
+    
+    if rationale_match:
+        rationale = rationale_match.group(1)
+    if answer_match:
+        answer = answer_match.group(1)
+    
+    # If we found either rationale or answer, return them
+    if rationale or answer:
+        return {"rationale": rationale, "answer": answer}
+    
+    # Last resort: try to parse the whole content as JSON
     try:
         return json.loads(content)
     except json.JSONDecodeError:
         logger.error(f"Failed to parse JSON from content")
-        raise ValueError("Failed to parse JSON from content")
+        # Create a fallback response
+        return {
+            "rationale": "Failed to parse response from model",
+            "answer": "Unknown (parsing error)"
+        }
 
 async def analyze_trivia_with_perplexity(ocr_result, debug=False, model=MODEL):
     """
@@ -147,9 +177,11 @@ async def analyze_trivia_with_perplexity(ocr_result, debug=False, model=MODEL):
         
     Returns:
         TriviaAnalysis: The parsed response from Perplexity with rationale and answer
+        or None if an error occurred
     """
     if not PERPLEXITY_API_KEY:
-        raise ValueError("Perplexity API key not found. Please set it in the .env file.")
+        logger.error("Perplexity API key not found. Please set it in the .env file.")
+        return None
     
     if debug:
         logger.info(f"Sending OCR result to Perplexity for analysis using model: {model}...")
@@ -158,18 +190,20 @@ async def analyze_trivia_with_perplexity(ocr_result, debug=False, model=MODEL):
     # Prepare the API request in a separate thread to avoid blocking
     loop = asyncio.get_event_loop()
     try:
+        # Run the request preparation in a thread pool to avoid blocking the event loop
         request = await loop.run_in_executor(
             thread_pool, 
             functools.partial(prepare_api_request, ocr_result, model)
         )
         
+        # Set up headers for the API request
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {PERPLEXITY_API_KEY}"
+        }
+        
         # Call the Perplexity API with timeout
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {PERPLEXITY_API_KEY}"
-            }
-            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     API_ENDPOINT,
@@ -180,7 +214,10 @@ async def analyze_trivia_with_perplexity(ocr_result, debug=False, model=MODEL):
                     if response.status != 200:
                         error_text = await response.text()
                         logger.error(f"Perplexity API error: {response.status} - {error_text}")
-                        raise ValueError(f"Perplexity API error: {response.status} - {error_text}")
+                        return TriviaAnalysis(
+                            rationale=f"API error: {response.status}",
+                            answer="Error (API failed)"
+                        )
                     
                     result = await response.json()
                     
@@ -205,17 +242,29 @@ async def analyze_trivia_with_perplexity(ocr_result, debug=False, model=MODEL):
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON response: {e}")
                 logger.error(f"Raw content: {content}")
-                raise ValueError(f"Failed to parse Perplexity response: Invalid JSON returned")
+                return TriviaAnalysis(
+                    rationale="Failed to parse JSON response",
+                    answer="Error (parsing failed)"
+                )
                 
         except asyncio.TimeoutError:
             logger.error(f"API request timed out after {API_TIMEOUT} seconds")
-            raise TimeoutError(f"Perplexity API request timed out after {API_TIMEOUT} seconds")
+            return TriviaAnalysis(
+                rationale=f"Request timed out after {API_TIMEOUT} seconds",
+                answer="Error (timeout)"
+            )
         except Exception as e:
             logger.error(f"Error processing Perplexity response: {e}")
-            raise ValueError(f"Failed to process Perplexity response: {e}")
+            return TriviaAnalysis(
+                rationale=f"Error: {str(e)}",
+                answer="Error (processing failed)"
+            )
     except Exception as e:
         logger.error(f"Error preparing API request: {e}")
-        raise ValueError(f"Failed to prepare API request: {e}")
+        return TriviaAnalysis(
+            rationale=f"Error preparing request: {str(e)}",
+            answer="Error (preparation failed)"
+        )
 
 def shutdown():
     """Shutdown the thread pool"""
