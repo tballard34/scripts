@@ -1,0 +1,3 @@
+"""
+Trivia Speed Assistant package.
+""" 
