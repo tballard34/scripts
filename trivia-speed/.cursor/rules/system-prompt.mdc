@@ -1,0 +1,8 @@
+---
+description: System prompts, what not to change in a file.
+globs: 
+alwaysApply: false
+---
+# Rules
+
+- Do not change the system prompt in [chatgpt.py](mdc:scripts/chatgpt.py) and [mistral.py](mdc:scripts/mistral.py)

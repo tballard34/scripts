@@ -28,7 +28,7 @@ EXPECTED_ANSWERS = {
     "Lineage.jpg": ["Lineage"]
 }
 
-def run_main_on_screenshot(screenshot_path, debug=False, verbose=False):
+def run_main_on_screenshot(screenshot_path, model="gpt", debug=False, verbose=False):
     """Run main.py on a screenshot and return the output and time taken"""
     start_time = time.time()
     
@@ -43,6 +43,12 @@ def run_main_on_screenshot(screenshot_path, debug=False, verbose=False):
     if debug:
         cmd.append("--debug")
     
+    # Add model-specific flags
+    if model == "gpt":
+        cmd.append("--no-mistral")
+    elif model == "mistral":
+        cmd.append("--no-gpt")
+    
     # Add the screenshot path
     cmd.append(screenshot_path)
     
@@ -56,7 +62,7 @@ def run_main_on_screenshot(screenshot_path, debug=False, verbose=False):
     
     # Check if the time taken is reasonable for an API call
     if time_taken < 1.0 and not debug:
-        print(f"WARNING: Response time ({time_taken:.2f}s) is too fast for a ChatGPT API call!")
+        print(f"WARNING: Response time ({time_taken:.2f}s) is too fast for a {model.upper()} API call!")
         print("The API might not be getting called. Try running with --debug to see more details.")
     
     if verbose:
@@ -133,18 +139,13 @@ def extract_answer(output):
         return output[:47] + "..."
     return output
 
-def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Test trivia-speed on a set of screenshots")
-    parser.add_argument("--debug", action="store_true", help="Run with debug output")
-    parser.add_argument("--verbose", action="store_true", help="Show verbose output")
-    args = parser.parse_args()
-    
-    # Get the path to the screenshots folder
-    screenshots_dir = Path(__file__).parent / "screenshots"
-    
-    # Create a results table
+def process_screenshots(screenshots_dir, model, args):
+    """Process all screenshots for a specific model and return results"""
     results = []
+    
+    print(f"\n{'='*50}")
+    print(f"Running tests with {model.upper()} model")
+    print(f"{'='*50}")
     
     print(f"{'Screenshot':<20} | {'Expected Answer':<20} | {'Actual Answer':<30} | {'Correct?':<10} | {'Time (s)':<10}")
     print("-" * 100)
@@ -158,7 +159,7 @@ def main():
         display_expected = expected_answers[0] if isinstance(expected_answers, list) else expected_answers
         
         # Run main.py on the screenshot
-        output, time_taken = run_main_on_screenshot(str(screenshot_file), args.debug, args.verbose)
+        output, time_taken = run_main_on_screenshot(str(screenshot_file), model, args.debug, args.verbose)
         
         # Extract the answer from the output
         actual_answer = extract_answer(output)
@@ -189,8 +190,54 @@ def main():
     # Check if the average time is reasonable for API calls
     avg_time = sum(r['time_taken'] for r in results)/total_count
     if avg_time < 1.0:
-        print("\nWARNING: Average response time is too fast for ChatGPT API calls!")
+        print(f"\nWARNING: Average response time is too fast for {model.upper()} API calls!")
         print("The API might not be getting called. Try running with --debug for more details.")
+    
+    return results
+
+def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Test trivia-speed on a set of screenshots")
+    parser.add_argument("--debug", action="store_true", help="Run with debug output")
+    parser.add_argument("--verbose", action="store_true", help="Show verbose output")
+    parser.add_argument("--no-gpt", action="store_true", help="Skip testing with GPT model")
+    parser.add_argument("--no-mistral", action="store_true", help="Skip testing with Mistral model")
+    args = parser.parse_args()
+    
+    # Get the path to the screenshots folder
+    screenshots_dir = Path(__file__).parent / "screenshots"
+    
+    # Check if both models are disabled
+    if args.no_gpt and args.no_mistral:
+        print("Error: Cannot disable both GPT and Mistral models. Please enable at least one model.")
+        return
+    
+    # Process screenshots for GPT if not disabled
+    gpt_results = []
+    if not args.no_gpt:
+        gpt_results = process_screenshots(screenshots_dir, "gpt", args)
+    
+    # Process screenshots for Mistral if not disabled
+    mistral_results = []
+    if not args.no_mistral:
+        mistral_results = process_screenshots(screenshots_dir, "mistral", args)
+    
+    # Print comparison if both models were tested
+    if not args.no_gpt and not args.no_mistral:
+        gpt_correct = sum(1 for r in gpt_results if r["is_correct"])
+        mistral_correct = sum(1 for r in mistral_results if r["is_correct"])
+        total_count = len(gpt_results)  # Should be the same for both
+        
+        print("\n" + "="*50)
+        print("Model Comparison")
+        print("="*50)
+        print(f"GPT Accuracy: {gpt_correct}/{total_count} ({gpt_correct/total_count*100:.1f}%)")
+        print(f"Mistral Accuracy: {mistral_correct}/{total_count} ({mistral_correct/total_count*100:.1f}%)")
+        
+        gpt_avg_time = sum(r['time_taken'] for r in gpt_results)/total_count
+        mistral_avg_time = sum(r['time_taken'] for r in mistral_results)/total_count
+        print(f"GPT Average Time: {gpt_avg_time:.2f}s")
+        print(f"Mistral Average Time: {mistral_avg_time:.2f}s")
 
 if __name__ == "__main__":
     main()

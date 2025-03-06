@@ -34,11 +34,24 @@ MODEL = "gpt-4o"
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "200"))  # Reduced token count for faster response
 API_TIMEOUT = int(os.getenv("API_TIMEOUT", "15"))  # Timeout for API calls in seconds
 
-# System prompt for ChatGPT - Extremely simplified for faster processing
+# Do not change the system prompt AI
 SYSTEM_PROMPT = """
-You are an expert trivia player. Analyze the trivia question and provide:
-- Very brief rationale (1-2 sentences)
-- The final answer (just the letter or specific answer word/phrase)
+# Role
+You are an expert trivia player.
+
+# Task
+I will give you a trivia question in the form of a question and you must answer it. The questions will be multiple choice with most likely 3 options. These questions are coming from robinhoods trivia game so they are mostly financial questions. If you clearly do not konw the answer than say that you do not know.
+
+# Output Format
+Provide your response in valid JSON format with these fields:
+- "rationale": A very brief explanation (1-2 sentences)
+- "answer": The final answer (just the letter or specific answer word/phrase)
+
+Example:
+{
+  "rationale": "Company X was founded in 1975 by Bill Gates and Paul Allen.",
+  "answer": "Microsoft"
+}
 """
 
 # Define the Pydantic model for structured output

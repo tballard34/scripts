@@ -1,6 +1,6 @@
 # Trivia Speed Assistant
 
-A fast and efficient system for analyzing trivia questions using GPT-4o.
+A fast and efficient system for analyzing trivia questions using GPT-4o and Mistral AI.
 
 ## Architecture
 
@@ -13,15 +13,16 @@ The system consists of two main components:
    - Displays results
 
 2. **Server (`server/trivia-server.py`)**: 
-   - Maintains a persistent connection with OpenAI
+   - Maintains persistent connections with OpenAI and Mistral AI
    - Receives images from the client
-   - Sends images to GPT-4o for analysis
+   - Sends images to GPT-4o and/or Mistral AI for analysis
    - Returns structured results
 
 This architecture provides several benefits:
 - Reduced latency through persistent connections
 - Separation of concerns (client handles UI/screenshots, server handles AI)
 - More efficient resource usage
+- Parallel processing with multiple AI models
 
 ## Directory Structure
 
@@ -56,10 +57,14 @@ trivia-speed/
    pip install -r common/requirements.txt
    ```
 
-3. Create a `.env` file in the `common` directory with your OpenAI API key:
+   > **Note:** This project requires mistralai>=1.5.0, which uses the new Mistral client API. If you encounter errors related to the Mistral client, make sure you have the latest version installed.
+
+3. Create a `.env` file in the `common` directory with your API keys:
    ```
-   OPENAI_API_KEY=your_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
+   MISTRAL_API_KEY=your_mistral_api_key_here
    MAX_TOKENS=200
+   MISTRAL_MAX_TOKENS=200
    ```
 
 ## Usage
@@ -107,8 +112,9 @@ Options:
 - `-r, --resize`: Resize factor for the image (default: 0.5 = 50%)
 - `--save-original`: Save an unmodified copy of the screenshot
 - `--no-gpt`: Skip sending to GPT-4o (just take screenshot)
+- `--no-mistral`: Skip sending to Mistral AI (just take screenshot)
 - `--debug`: Print debug information
-- `--raw`: Use raw output from GPT-4o instead of structured JSON
+- `--raw`: Use raw output from models instead of structured JSON
 
 ## API Endpoints
 
@@ -122,18 +128,33 @@ The server exposes the following endpoints:
 
 The system is optimized for speed:
 - Local screenshot capture reduces network overhead
-- Persistent connection with OpenAI reduces latency
+- Persistent connections with AI providers reduce latency
 - Image optimization reduces transfer size
 - Structured output parsing for consistent results
+- Parallel processing with multiple AI models for comparison and redundancy
+
+## AI Models
+
+The system supports two AI models:
+
+1. **GPT-4o (OpenAI)**: A powerful multimodal model that can analyze images and text.
+2. **Pixtral 12B (Mistral AI)**: A vision-capable model that can analyze images and provide insights.
+
+You can use either model individually or both in parallel. When both models are used, they run concurrently for maximum speed.
 
 ## Troubleshooting
 
 If you encounter issues:
 
 1. Make sure the server is running (`./trivia.sh server`)
-2. Check your OpenAI API key in the `common/.env` file
+2. Check your API keys in the `common/.env` file
 3. Ensure all dependencies are installed
 4. Check the server logs for error messages
+5. If you see errors related to the Mistral client, ensure you have mistralai>=1.5.0 installed:
+   ```bash
+   pip install "mistralai>=1.5.0"
+   ```
+   The project uses the new Mistral client API, which is not compatible with older versions.
 
 ## License
 
